@@ -1,6 +1,13 @@
-falcon.cipher = function(key, mode, Tlen) {
-    this.mode = mode, this.Tlen = Tlen;
-    this.store = jQuery.jStorage;
+/** @fileOverview falcon encryption cipher
+ *
+ *
+ * @author Kyle Graehl
+ * @author Aseem Mohanty
+ */
+
+/** 
+ * @class aes block cipher class  */
+falcon.cipher = function(key) {
     this.block_size = 16;
     this.ivoffset = 0;
     this.async_decrypt_blocks = 1000;
@@ -8,7 +15,10 @@ falcon.cipher = function(key, mode, Tlen) {
 };
 
 falcon.cipher.prototype = {
-    /* XXX: Assumes key is hex */
+
+    /**
+     * XXX: Assumes key is hex
+     */
     createCTRCipher: function(key) {
         var aeskey = [];
         if (key) {
@@ -88,30 +98,26 @@ falcon.cipher.prototype = {
         }
         return output;
     },
-
     removeTrailingNuls: function(bytes) {
         var len = bytes.length;
         var isString = typeof bytes === "string";
         for (var i = len - 1; i >= 0; i--) {
-            // XXX: very very bad!!!!
             if (isString && bytes[i] == "\0") bytes = bytes.slice(0, i); 
             else if (bytes[i] == 0) bytes.pop();
             else break;
         }
-        // XXX: wohooo strings.
         return bytes;
     },
-
     encrypt: function(text) {
-        if (!this.cipher) return text;
-        var bytes = [],
-        ciphertext = [];
+        var bytes = [];
         this.asciiToBytes(text, bytes);
         var ciphertext = this.ctr_crypt(bytes);
         var r = this.bytesToHex(ciphertext);
         return r;
     },
-
+    /**
+     * decrypts a block of hex text from the client asynchronously
+     */
     decrypt_async: function(text, callback, options) {
         // decrypts the data (eventually)
         // iPhone has an unforgiving function return timer (functions
@@ -176,10 +182,10 @@ falcon.cipher.prototype = {
 
     },
 
+    /**
+     * decrypts a block of hex text from the client synchronously
+     */
     decrypt: function(text, options) {
-        if (!this.cipher || !(typeof text == 'string')) {
-            return text;
-        }
         var cipherBytes = this.hexToBytes(text);
         var plainBytes = this.ctr_crypt(cipherBytes);
         // remove trailing nul bytes
@@ -194,6 +200,7 @@ falcon.cipher.prototype = {
     wordsToBytes: function(words, bytes) {
         var bitmask = 1;
         for (var i=0; i < 7; i++) bitmask = (bitmask << 1) | 1;
+
         for (var i=0; i < words.length; i++) {
             var bstart = i*4;
             for (var j=0; j < 4; j++) {
@@ -201,7 +208,6 @@ falcon.cipher.prototype = {
             }
         }
     },
-
     bytesToWords: function(bytes, words) {
         var paddedBytes = bytes.slice();
         while (paddedBytes.length % 4 != 0) paddedBytes.push(0);
@@ -209,47 +215,39 @@ falcon.cipher.prototype = {
         for (var j=0; j < num_words; j++)
             words[j] = ((paddedBytes[(j<<2)+3]) | (paddedBytes[(j<<2)+2] << 8) | (paddedBytes[(j<<2)+1] << 16) | (paddedBytes[j<<2] << 24));
     },
-
+    hexDigits: '0123456789ABCDEF',
     byteToHex: function(n) {
-        var hexDigits = '0123456789ABCDEF';
-        return (hexDigits.charAt(n >> 4) + hexDigits.charAt(n & 15));
+        return (this.hexDigits.charAt(n >> 4) + this.hexDigits.charAt(n & 15));
     },
-
     bytesToHex: function(bytes) {
-        var out = "";
+        var out = [];
         for (var i = 0, l = bytes.length; i < l; i++)
-            out += this.byteToHex(bytes[i]);
-        return out;
+            out.push( this.byteToHex(bytes[i]) );
+        return out.join('');
     },
-
     hexToBytes: function(hex) {
         var bytes = [];
         for (var i = 0; i < hex.length; i += 2)
             bytes.push(parseInt(hex.charAt(i) + hex.charAt(i + 1), 16));
         return bytes;
     },
-
     asciiToBytes: function(ascii, bytes) {
         var len = ascii.length;
         for (var i=0; i < len; i++)
             bytes[i] = ascii.charCodeAt(i);
     },
-
     bytesToAscii: function(bytes) {
-
-  //      return _.map( bytes, function(byte) { return String.fromCharCode(byte); } ).join('');
-
-        // strings are immutable... this is wasteful
-
-        var ascii = "";
+        var chars = [];
         var len = bytes.length;
         for (var i=0; i < len; i++) {
-            ascii = ascii + String.fromCharCode(bytes[i]);
+            chars.push( String.fromCharCode(bytes[i]) );
         }
-        return ascii;
-
+        return chars.join('');
     },
-
+    /**
+     * @param Array of integers (values 0-255, bytes)
+     * @return javascript utf-8 string
+     */
     bytesToUnicode: function(bytes) {
 
         var chars = [];
@@ -266,8 +264,9 @@ falcon.cipher.prototype = {
                 var codebits = '';
                 var bits = bite.toString(2);
                 if (bits[1] == '0') {
-					if (window.console && console.log)
+		    if (window.console && console.log) {
                     	console.log('illegal utf8 encoding');
+                    }
                     chars.push( '\ufffd' );
                     i += 1;
                     continue;
@@ -284,8 +283,9 @@ falcon.cipher.prototype = {
                     if (curbyte) {
                         codebits += (bytes[i+k]).toString(2).slice(2,8);
                     } else {
-						if (window.console && console.log)
-                        	console.log('illegal utf8 encoding');
+			if (window.console && console.log) {
+                            console.log('illegal utf8 encoding');
+                        }
                     }
                 }
 

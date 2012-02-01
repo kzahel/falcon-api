@@ -1,12 +1,10 @@
-/*
+/** @fileOverview session negotiation
+ *
+ *
+ * @author Kyle Graehl
+ * @author Aseem Mohanty
+ **/
 
- Handles key negotiation and sessions through remote
-
-
- new falcon.session()
-
-
- */
 BigInteger.prototype.toPaddedHex = function(paddedLength) {
     var hex = this.toString(16);
     while (hex.length < paddedLength)
@@ -27,15 +25,50 @@ for (var i=0;i<1000;i++) {
     sjcl.random.addEntropy(Math.random(), 2);
 }
 
-falcon.session = function() {
+/**
+ * @class a falcon remote session
+ * create a new falcon session
+ */
+falcon.session = function(options) {
+    this.callbacks = {
+        invalidated: []
+    };
+    this.api = null;
+    this._token_fetching = false;
+    this._token_fetched = false;
+    this._pending_requests = [];
+
+    if (options && options.client_data) {
+	this.api = new falcon.api(options.client_data);
+    }
 }
 
 falcon.session.prototype = {
-
+    request: function(uri, url_params, body_params, callback) {
+        if (! this._token_fetched) {
+            if (! this._token_fetching) {
+                console.log('fetching token');
+                this.api.request('GET', '/client/gui/token.html', {}, {}, _.bind(this.token_fetched,this));
+                this._token_fetching = true;
+            }
+            var thislater = _.bind(this.request, this, uri, url_params, body_params, callback);
+            this._pending_requests.push(thislater);
+        } else {
+            this.api.request( 'GET', '/client' + uri, url_params, body_params, callback );
+        }
+    },
+    token_fetched: function(resp) {
+        this._token_fetched = true;
+        this._token_fetching = false;
+        _.each( this._pending_requests, function(req) { req(); } );
+        this._pending_requests = [];
+    },
+    /** @private **/
     set_progress_range: function(low, hi, pct) {
         var width = Math.min((hi-low)*pct+low, hi);
         this.set_progress(width);
     },
+    /** @private **/
     set_progress: function(amount) {
         if (this.options && this.options.progress) {
             this.options.progress(amount);
@@ -43,6 +76,7 @@ falcon.session.prototype = {
             console.log('progress',amount);
         }
     },
+    /** @private **/
     set_label: function(message) {
         if (this.options && this.options.label) {
             this.options.label(message);
@@ -50,21 +84,22 @@ falcon.session.prototype = {
             console.log('label',message);
         }
     },
-    error_out: function(data, xhr, text) {
-        console.error('error in key negotiation');
-        if (config.asserts) { debugger; }
+    /** @private **/
+    error_out: function(xhr, status, text) {
+        console.error('error in key negotiation', status, text);
         if (this.options && this.options.error) { 
-            return this.options.error(data, xhr);
+            return this.options.error(xhr, status, text);
         } else {
-            alert(data);
+            alert('failure negotiating: ' + text);
         }
     },
-    jsonp_error: function(data, xhr, text) {
+    /** @private **/
+    jsonp_error: function(xhr, status, text) {
         // uncatchable jsonp error
         debugger;
-        this.error_out(data. xhr);
+        this.error_out(xhr, status, text);
     },
-
+    /** @private **/
     get_srp_url: function(data, newsession) {
         var url = config.srp_root + '/api/login/'; // needs trailing slash
 
@@ -80,7 +115,11 @@ falcon.session.prototype = {
         }
         return url;
     },
-
+    /** negotiate an encryption key with the remote client
+     * @param String username
+     * @param String password
+     * @param Object negotiation options. Pass in "success" "error" callback functions.
+     *  **/
     negotiate: function(username, password, options) {
         this.options = options;
         this.credentials = {username: username, password: password};
@@ -95,17 +134,25 @@ falcon.session.prototype = {
                         error: _.bind(this.jsonp_error, this),
                         success: _.bind(this.create_public_key, this) } );
     },
-    create_public_key: function(data, code, xhr) {
+    /** pass in a function that will be called when the client no
+     * longer recognizes the encrypted session
+     * @param Function callback
+     */
+    add_invalidated_callback: function(callback) {
+        this.callbacks.invalidated.push(callback);
+    },
+    /** @private **/
+    create_public_key: function(data, status, xhr) {
         if (data.error) {
             console.error('error getting generator', data);
-            return this.error_out(data);
+            return this.error_out(xhr, status, data);
         }
         this.guid = data.guid;
         var response = data.response;
 
         if (! response.length || response.length != 3) {
             console.error('public key response makes no sense', response);
-            return this.error_out(response);
+            return this.error_out(xhr, status, 'public key response bad');
         }
 
         this.set_progress(.3);
@@ -123,6 +170,7 @@ falcon.session.prototype = {
         }
         this.generator.modPow(this.exponent, this.modulus, _.bind(this.created_public_key, this), progress_fn);
     },
+    /** @private **/
     created_public_key: function(public_key) {
         this.public_key = public_key;
         var data = {
@@ -135,24 +183,26 @@ falcon.session.prototype = {
                                               error: _.bind(this.jsonp_error, this),
                                               success: _.bind(this.sent_public_key, this) } );
     },
+    /** @private **/
     sent_public_key: function(data, status, xhr) {
         // this should not be an anonymous function!
         if (data.error)  {
             console.error('error',data);
-            this.error_out( data.error );
+            this.error_out( xhr, status, data.error );
             return;
         }
         var response = data.response;
-        this.create_session_key(xhr, new BigInteger(response[0], 10), this.modulus, this.generator, this.salt, this.exponent);
+        this.create_session_key(xhr, status, new BigInteger(response[0], 10), this.modulus, this.generator, this.salt, this.exponent);
     },
-    create_session_key: function(xhr, server_key, modulus, generator, salt, exponent) {
+    /** @private **/
+    create_session_key: function(xhr, status, server_key, modulus, generator, salt, exponent) {
         this.set_progress(.45);
         this.set_label("Creating session key...");
 
         this.server_key = server_key;
         // We abort the protocol here if B == 0 (mod N).
         if (0 == this.server_key.modPow(new BigInteger("1", 10), this.modulus)) {
-            this.error_out("The client provided an invalid public key. " + server_key + "Please try again.");
+            this.error_out(xhr, status, "The client provided an invalid public key. " + server_key + "Please try again.");
         }
 
         var kay = new BigInteger("3", 10);
@@ -199,11 +249,11 @@ falcon.session.prototype = {
                                  });
                          }, progress_fn);
     },
-
+    /** @private **/
     compute_verify_key_one: function(client_key) { /* M1 = H(H(N) XOR H(g) | H(l) | s | A | B | KCarol) */
 
         //this.set_progress(.8);
-        this.set_label("Sending key verifier to ...");
+        this.set_label("Sending key verifier");
 
         var xor_term = new BigInteger(sha1Hash(this.modulus.toAscii(320)), 16).xor(new BigInteger(sha1Hash(
                                                                                                       this.generator.toAscii(2)), 16));
@@ -218,6 +268,7 @@ falcon.session.prototype = {
         this.M1 = new BigInteger(M1, 16);
         return this.M1.toString(10);
     },
+    /** @private **/
     compute_verify_key_two: function(key) { /* M2 = H(A | M1 | KSteve) */
         var A = this.public_key;
 
@@ -230,6 +281,7 @@ falcon.session.prototype = {
     // Confusingly, we run verify using "client_key," which is the full 20-byte
     // SHA-1 hash, but we use the 16-byte prefix, "key," as the actual AES key,
     // since we're using AES-128.
+    /** @private **/
     verify_key: function(key) {
         if (! key) { if (config.asserts) { debugger; } }
         var _this = this;
@@ -244,11 +296,12 @@ falcon.session.prototype = {
                                                error: _.bind(this.jsonp_error, this),
                                                success: _.bind(this.got_key_verify, this) } );
     },
+    /** @private **/
     got_key_verify: function(data, status, xhr) {
         var _this = this;
         if (data.error)  {
             console.error('error',data);
-            this.error_out( data.error );
+            this.error_out( xhr, status, data.error );
             return;
         }
         var response = data.response;
@@ -279,7 +332,10 @@ falcon.session.prototype = {
                 }
             }
         } else {
-            _this.error_out("Verification response from the remote client was invalid. This could be due to an " + "intermittent connection problem or a username " + "or password mismatch. Please check them and try " + "again.");
+            _this.error_out(xhr, status, "Password invalid");
         }
+    },
+    serialize: function() {
+	return this.api.client_data;
     }
 }

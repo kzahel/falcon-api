@@ -1,9 +1,23 @@
+/** @fileOverview falcon api
+ *
+ *
+ * @author Kyle Graehl
+ */
+
 (function() {
 
      function make_part(v,k) {
          return 'Content-Disposition: multipart/form-data; name="' + k + '"\r\n\r\n' + v + '\r\n';
      }
 
+     /**
+      * @constructor
+      * @param Object needs a bunch of client data - encryption key,
+      * session id, access token. Use {falcon.session.negotiate} to
+      * get these values.
+      * 
+      * @class falcon request api class
+      */
      falcon.api = function(client_data) {
          this.boundary = 'AaB03x';
          this.client_data = client_data;
@@ -18,8 +32,8 @@
           * @param {String} base_url the request URL.
           * @param {Object or String} url_params parameters or the uri string (appended to base_url)
           * @param {Object} body_params encrypted POST body.
-          * @param {Function} callback success callback.
-          * @param {Function} failure_callback failure callback.
+          * @param {Function} callback success callback. (passes in cipherdata, decrypteddata, status, xhr)
+          * @param {Function} failure_callback failure callback (passes in in xhr, status, text)
           * @param {Function} options request options.
           */
          request: function(method, base_url, url_params, body_params, callback, failure_callback, options) {
@@ -70,12 +84,15 @@
                      if (_this.jsonp) {
                          console.error('BAD! always expect 200 responses from raptor');
                      }
-                     failure_callback(null, status, xhr, text);
+                     if (failure_callback) {
+                         failure_callback(xhr, status, text);
+                     }
                  }
              };
              ajax_options.success = _.bind(this.on_request_response, this, ajax_options, callback, failure_callback);
              return jQuery.ajax(ajax_options);
          },
+         /** @private **/
          decrypt_response: function(origdata, status, xhr, options) {
              // decrypts the response and updates the cipher sequence
              var _this = this;
@@ -90,6 +107,7 @@
              var response = _this.cipher.decrypt(origdata, opts);
              return response;
          },
+         /** @private **/
          decrypt_response_async: function(origdata, status, xhr, callback, options) {
              // decrypts the response asynchronously (yielding to prevent
              // javascript from locking up) and updates the cipher sequence
@@ -105,6 +123,7 @@
                                             callback(origdata, data, status, xhr);
                                         }, options);
          },
+         /** @private **/
          make_post_body: function(params) {
              var _this = this;
              var body = '--' + _this.boundary + '\r\n';
@@ -123,6 +142,7 @@
              body += '--' + _this.boundary + '\r\n\r\n\r\n';
              return body;
          },
+         /** @private **/
          make_request_url: function(params) {
              if (! params || _.keys(params).length==0) { 
                  params = {nop:1};
@@ -141,10 +161,19 @@
                     });
              return parts.join('&');
          },
+         /** @private **/
          on_request_response: function(request, callback, failure_callback, data, status, xhr) {
              var _this = this;
              if (! data) {
-                 failure_callback(xhr, status, 'empty response body');
+                 if (failure_callback) {
+                     failure_callback(xhr, status, 'empty response body');
+                 }
+                 console.error('empty response body');
+             } else if (data == 'invalid request') {
+                 if (failure_callback) {
+                     failure_callback(xhr, status, 'invalid request');
+                 }
+                 console.error('client says invalid request');
              } else {
                  if (request.url.match('/gui/token.html')) {
                      // token is not returned via JSON and returned differently for JSONP :-(
@@ -162,7 +191,9 @@
                          callback(this.token, status, xhr);
                      } else {
                          console.error('invalid token');
-                         failure_callback(status, xhr, 'invalid token: ' + data);
+                         if (failure_callback) {
+                             failure_callback(xhr, status, 'invalid token: ' + data);
+                         }
                      }
 
                  } else {
@@ -170,6 +201,7 @@
                  }
              }
          },
+         /** @private **/
          on_request_response_decrypted: function(request, callback, failure_callback, orig_data, decrypted_data, status, xhr) {
              var json = null;
              try { 
@@ -182,18 +214,23 @@
 
                  // thus, TODO:
                  // if this fails, fall back to ASCII
-                 var json = jQuery.parseJSON(decrypted_data);
+                 json = jQuery.parseJSON(decrypted_data);
              } catch (e) {
                  console.error('utf 8 decoding failed');
              }
              if (json) {
-                 if (callback) {
+                 if (json.error) {
+                     debugger;
+                     failure_callback(xhr, status, json);
+                 } else if (callback) {
                      callback(json, status, xhr);
                  } else {
                      console.log('got response',json);
                  }
              } else {
-                 failure_callback(xhr, status, 'invalid json: ' + decrypted_data);
+                 if (failure_callback) {
+                     failure_callback(xhr, status, 'invalid json: ' + decrypted_data);
+                 }
              }
          }
      };
