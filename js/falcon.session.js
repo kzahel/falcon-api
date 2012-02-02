@@ -322,7 +322,8 @@ falcon.session.prototype = {
                                     cid: data.cid,
                                     host: data.host,
                                     guid: guid,
-                                    version: data.version
+                                    agent: data.agent,
+				    api: '2.0'
                                   };
 
                 console.log('log in success with client data',client_data);
