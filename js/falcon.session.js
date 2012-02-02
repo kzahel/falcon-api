@@ -71,15 +71,15 @@ falcon.session.prototype = {
     /** @private **/
     set_progress: function(amount) {
         if (this.options && this.options.progress) {
-            this.options.progress(amount);
+            this.options.progress( { 'progress': amount } );
         } else {
             console.log('progress',amount);
         }
     },
     /** @private **/
     set_label: function(message) {
-        if (this.options && this.options.label) {
-            this.options.label(message);
+        if (this.options && this.options.progress) {
+            this.options.progress( { 'message': message } );
         } else {
             console.log('label',message);
         }
@@ -127,6 +127,8 @@ falcon.session.prototype = {
         var data = {
             user: username
         };
+
+	this.set_label('Sending computer name');
 
         jQuery.ajax(this.get_srp_url(data, true), { 
                         dataType: 'jsonp',
@@ -188,7 +190,7 @@ falcon.session.prototype = {
         // this should not be an anonymous function!
         if (data.error)  {
             console.error('error',data);
-            this.error_out( xhr, status, data.error );
+            this.error_out( xhr, status, data );
             return;
         }
         var response = data.response;
@@ -301,7 +303,7 @@ falcon.session.prototype = {
         var _this = this;
         if (data.error)  {
             console.error('error',data);
-            this.error_out( xhr, status, data.error );
+            this.error_out( xhr, status, data );
             return;
         }
         var response = data.response;
