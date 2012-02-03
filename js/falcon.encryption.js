@@ -23,6 +23,7 @@ falcon.cipher.prototype = {
         var aeskey = [];
         if (key) {
             var words = [];
+	    debugger;
             this.bytesToWords(this.hexToBytes(key), words);
             var key_words = words.splice(0, 4);
             this.iv = [];

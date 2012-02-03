@@ -277,7 +277,7 @@ falcon.session.prototype = {
         //this.set_progress(.9);
         this.set_label("Verifying key ...");
 
-        var M2 = sha1Hash(A.toAscii(320) + this.M1.toAscii(40) + _this.client_key.toAscii(40));
+        var M2 = sha1Hash(A.toAscii(320) + this.M1.toAscii(40) + this.client_key.toAscii(40));
         return new BigInteger(M2, 16).toString(10);
     },
     // Confusingly, we run verify using "client_key," which is the full 20-byte

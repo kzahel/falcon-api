@@ -221,6 +221,11 @@ def go():
     logging.info('login with result %s' % result)
 
 
+    from Crypto.Cipher import AES
+    pdb.set_trace()
+    result['key']
+
+
 ioloop = tornado.ioloop.IOLoop.instance()
 go()
 ioloop.start()
