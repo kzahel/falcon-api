@@ -180,6 +180,7 @@ falcon.session.prototype = {
             pub: public_key.toString(10),
             time: new Date().getTime()
         };
+	console.log(this.get_srp_url(data));
         jQuery.ajax(this.get_srp_url(data), { dataType: 'jsonp',
                                               cached: false,
                                               error: _.bind(this.jsonp_error, this),
@@ -244,15 +245,16 @@ falcon.session.prototype = {
                                                          //jQuery.debug("client_num ('pre-key'): " + client_num.toString(10));
                                                          client_hash = sha1Hash(client_num.toAscii(320));
                                                          _this.client_key = new BigInteger(client_hash, 16);
+							 _this.client_key_str = _this.client_key.toPaddedHex(40).slice(0, 40);
                                                          // We only want the first 16 bytes of the key because we're only
                                                          // using AES-128.
-                                                         _this.verify_key(_this.client_key.toPaddedHex(40).slice(0, 40));
+                                                         _this.verify_key();
                                                      }, progress_fn2);
                                  });
                          }, progress_fn);
     },
     /** @private **/
-    compute_verify_key_one: function(client_key) { /* M1 = H(H(N) XOR H(g) | H(l) | s | A | B | KCarol) */
+    compute_verify_key_one: function() { /* M1 = H(H(N) XOR H(g) | H(l) | s | A | B | KCarol) */
 
         //this.set_progress(.8);
         this.set_label("Sending key verifier");
@@ -261,8 +263,6 @@ falcon.session.prototype = {
                                                                                                       this.generator.toAscii(2)), 16));
         var A = this.public_key;
         var B = this.server_key;
-        this.client_key = client_key;
-        this.client_key_str = client_key.toPaddedHex(40).slice(0, 40);
 
         var M1_pre_hash = xor_term.toAscii(40) + new BigInteger(
             sha1Hash(this.username), 16).toAscii(40) + this.salt.toAscii(20) + A.toAscii(320) + B.toAscii(320) + this.client_key.toAscii(40);
@@ -271,26 +271,25 @@ falcon.session.prototype = {
         return this.M1.toString(10);
     },
     /** @private **/
-    compute_verify_key_two: function(key) { /* M2 = H(A | M1 | KSteve) */
+    compute_verify_key_two: function() { /* M2 = H(A | M1 | KSteve) */
         var A = this.public_key;
 
         //this.set_progress(.9);
         this.set_label("Verifying key ...");
 
-        var M2 = sha1Hash(A.toAscii(320) + this.M1.toAscii(40) + key.toAscii(40));
+        var M2 = sha1Hash(A.toAscii(320) + this.M1.toAscii(40) + _this.client_key.toAscii(40));
         return new BigInteger(M2, 16).toString(10);
     },
     // Confusingly, we run verify using "client_key," which is the full 20-byte
     // SHA-1 hash, but we use the 16-byte prefix, "key," as the actual AES key,
     // since we're using AES-128.
     /** @private **/
-    verify_key: function(key) {
-        if (! key) { if (config.asserts) { debugger; } }
+    verify_key: function() {
         var _this = this;
         if (window.eventTracker) eventTracker.track('Login', 'SendVerify');
         var data =         {
             username: _this.username,
-            verify: _this.compute_verify_key_one(_this.client_key),
+            verify: _this.compute_verify_key_one(),
             time: new Date().getTime()
         };
         jQuery.ajax(_this.get_srp_url(data), { dataType: 'jsonp',
@@ -309,7 +308,7 @@ falcon.session.prototype = {
         var response = data.response;
 
         var M2 = response[0];
-        if (M2 == _this.compute_verify_key_two(_this.client_key)) {
+        if (M2 == _this.compute_verify_key_two()) {
             _this.set_progress(1);
             _this.set_label("Verification complete!");
 
