@@ -1,1 +1,9 @@
-javascript developers api for remote.utorrent.com
+Developers API for remote.utorrent.com
+
+- Negotiates symmetric AES encryption keys using "Secure Remote Password Protocol" - http://srp.stanford.edu/ndss.html
+- Uses AES CTR block cipher to communicate securely with your BitTorrent Remote enabled product (uTorrent, BitTorrent, etc), from anywhere
+
+Current supported languages:
+
+- Javascript
+- Python

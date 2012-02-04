@@ -1,3 +1,8 @@
+#!/usr/bin/env python
+
+# messy first-run at falcon SRP key negotiation and aes ctr decryption
+
+
 import tornado.iostream
 import tornado.ioloop
 from tornado import gen
@@ -121,7 +126,8 @@ def make_request(request, expectjson=True, cipher=None, callback=None):
     
 @gen.engine
 def login(username, password, callback=None):
-    request = Request('GET', '%s/api/login/?new=1&user=%s' % (options.srp_root, username))
+    args = {'user': username}
+    request = Request('GET', '%s/api/login/?%s' % (options.srp_root, urllib.urlencode(args)))
     response = yield gen.Task( make_request, request )
     if response.error:
         logging.error('response error')
@@ -240,8 +246,8 @@ assert loglshift(234,24) == -369098752
 
 def hexToBytes(hex):
     return [ int( hex[i*2]+hex[i*2+1],16 ) for i in range(len(hex)/2) ]
-def bytesToHex(bytes):
-    return ''.join( pad(hex(byte)[2:],2,'0') for byte in bytes )
+#def bytesToHex(bytes):
+#    return ''.join( pad(hex(byte)[2:],2,'0') for byte in bytes )
 def bytesToWords(bytes):
     # probably not working as indended
     if len(bytes) % 4 != 0:
@@ -256,15 +262,10 @@ def bytesToWords(bytes):
     return words
 import struct
 
-    
-
-#assert bytesToWords([239, 88, 250, 18]) == [-279381486]
-
-#assert bytesToWords([239, 88, 250, 18, 180, 39, 224, 127, 10, 94, 200, 21, 181, 9, 237, 254, 205, 207, 103, 15]) == [-279381486, -1272455041, 173983765, -1257640450, -842045681]
+assert bytesToWords([239, 88, 250, 18]) == [-279381486]
+assert bytesToWords([239, 88, 250, 18, 180, 39, 224, 127, 10, 94, 200, 21, 181, 9, 237, 254, 205, 207, 103, 15]) == [-279381486, -1272455041, 173983765, -1257640450, -842045681]
 assert bytesToWords([198, 218, 79, 150, 40, 6, 187, 93, 115, 41, 205, 156, 100, 156, 161, 23, 199, 14, 29, 3]) == [-958771306, 671529821, 1932119452, 1687986455, -955376381]
 
-
-#def rshift(val, n): return val>>n if val >= 0 else (val+0x100000000)>>n
 def rshift(val, n): return (val % 0x100000000) >> n # faster
 
 def wordsToBytes(words):
@@ -302,9 +303,9 @@ class Cipher:
         words = bytesToWords(bytes)
         key_words = words[:4]
         self.iv = wordsToBytes( [words[-1],words[-1],words[-1],words[-1]] )
-        #self.cipher = AES.new( self.hex_to_ascii(key[:32]), AES.MODE_CTR, counter=self.counter )
+        self.cipher = AES.new( self.hex_to_ascii(key[:32]), AES.MODE_CTR, counter=self.counter )
         self.block_size = 16
-        self.cipher = AES.new( self.hex_to_ascii(key[:32]), AES.MODE_ECB )
+        #self.cipher = AES.new( self.hex_to_ascii(key[:32]), AES.MODE_ECB )
 
     def hex_to_ascii(self, data):
         if len(data)%2 != 0:
@@ -315,59 +316,7 @@ class Cipher:
         return ''.join(chars)
 
     def encrypt(self, data):
-        return self.decrypt_manual(data)
-
-    def decrypt_manual(self, data):
-        #return self.decrypt(data)
-        # do chunk at a time, manually doing ctr mode...
-        cur_block = 0
-        output = []
-        while cur_block < int(math.ceil(len(data)/float(self.block_size))):
-            output.append( self.decrypt_block( data[cur_block*self.block_size : (cur_block+1)*self.block_size] ) )
-            cur_block += 1
-
-        return ''.join(output)
-
-    def decrypt_block(self, input):
-        ctr = self.counter()
-        mask = self.cipher.encrypt(ctr)
-        endian = 'big'
-
-        if len(input) < self.block_size: # pad with zeroes
-            inputp = input + ('\x00'*(self.block_size-len(input)))
-        else:
-            inputp = input
-
-        a = bitarray.bitarray(endian=endian)
-        a.frombytes(mask)
-
-        b = bitarray.bitarray(endian=endian)
-        b.frombytes(inputp)
-        print 'xor',self.ivoffset
-        print 'iv',self.iv
-        print 'inp',map(ord,input)
-        print 'mas',map(ord,mask)
-        output = a ^ b
-        if len(input) < self.block_size:
-            toreturn = output.tobytes()[:len(input)]
-        else:
-            toreturn = output.tobytes()
-
-        print 'ret',map(ord, toreturn)
-        return toreturn
-
-    def decrypt(self, data):
-        logging.info('cipher: decrypt %s' % [data])
-
-        chars = []
-        for i in range(len(data)/2):
-            chars.append( chr( int(data[i*2:i*2+2], 16) ) )
-        data = ''.join(chars)
-        logging.info('cipher: toascii %s' % [data])
-
-        decrypted = self.cipher.decrypt(data)
-        logging.info('cipher: decrypted to %s' % [decrypted])
-        return decrypted
+        return self.cipher.decrypt(data)
 
     def counter(self):
         ctr = self.iv[:]
@@ -399,12 +348,18 @@ class Cipher:
         
         self.ivoffset += 1
         toreturn = ''.join(map(chr, ctr))
-        #logging.info('called ctr, returning %s' % map(ord,toreturn))
         return toreturn
+
+def parse_token(body):
+    begstr = "style='display:none;'>"
+    endstr = "</div>"
+    i1 = body.index(begstr)
+    i2 = body.index(endstr)
+    return body[i1+len(begstr):i2]
 
 from Crypto.Cipher import AES
 @gen.engine
-def go():
+def test_login():
     username = 'kylepoo8'
     password = 'pass'
 
@@ -426,6 +381,11 @@ def go():
 
     response = yield gen.Task( make_request, request, expectjson=False, cipher=cipher )
     #logging.info('token response %s' % [response.body])
+    token = parse_token(response.body)
+    logging.info('got token %s' % token)
+
+    
+    url = '%s/client/gui?list=1?%s' % (result['host'], urllib.urlencode(args))
 
 
 @gen.engine
@@ -448,6 +408,6 @@ def test_decrypt():
 
 if __name__ == '__main__':
     ioloop = tornado.ioloop.IOLoop.instance()
-    #go()
-    test_decrypt()
+    test_login()
+    #test_decrypt()
     ioloop.start()
