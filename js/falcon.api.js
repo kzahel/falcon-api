@@ -46,14 +46,22 @@
              }
              if (this.jsonp) { url = this.client_data.host + url; }
 
-             var data = _.extend({
-                                     token: _this.token,
-                                     t: (new Date()).getTime()
-                                 }, body_params);
+	     if (_this.token) {
+		 var data = _.extend({
+					 token: _this.token,
+					 t: (new Date()).getTime()
+                                     }, body_params);
+		 var post_body = _this.make_post_body( data );
+		 var xbtseq = _this.cipher.ivoffset; // GRAB this before encrypting!!!
+		 var encrypted_body = _this.cipher.encrypt( post_body );
+	     } else {
+		 var post_body = null;
+		 var encrypted_body = null;
+	     }
 
-             var post_body = _this.make_post_body( data );
-             var xbtseq = _this.cipher.ivoffset; // GRAB this before encrypting!!!
-             var encrypted_body = _this.cipher.encrypt( post_body );
+
+
+
              
              if (options && options.timeout) {
                  var timeout = options.timeout;
@@ -63,7 +71,10 @@
 
              if (this.jsonp) { 
                  method = 'GET'; 
-                 url = url + '&encbody=' + encrypted_body + '&x_bt_seq=' + xbtseq + '&GUID=' + this.client_data.guid + '&bt_talon_tkt=' + encodeURIComponent(this.client_data.bt_talon_tkt);
+                 url = url + '&GUID=' + this.client_data.guid + '&bt_talon_tkt=' + encodeURIComponent(this.client_data.bt_talon_tkt);
+		 if (encrypted_body) {
+		     url = url + '&encbody=' + encrypted_body + '&x_bt_seq=' + xbtseq;
+		 }
                  encrypted_body = null;
              }
 

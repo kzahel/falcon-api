@@ -23,12 +23,10 @@ falcon.cipher.prototype = {
         var aeskey = [];
         if (key) {
             var words = [];
-	    debugger;
             this.bytesToWords(this.hexToBytes(key), words);
             var key_words = words.splice(0, 4);
             this.iv = [];
             this.wordsToBytes([words[0], words[0], words[0], words[0]], this.iv);
-            this.wordsToBytes(key_words, aeskey);
             this.cipher = new sjcl.cipher.aes(sjcl.codec.hex.toBits(key.slice(0, 32)));
         }
     },
@@ -67,16 +65,22 @@ falcon.cipher.prototype = {
         this.inc_ctr(ctr);
 
         /* generate masks */
-        var mask = new Array(16);
+        //var mask = new Array(16);
         var cblocks = [];
         var hex = this.bytesToHex(ctr);
         cblocks = sjcl.codec.hex.toBits(hex);
         mask = this.hexToBytes(sjcl.codec.hex.fromBits(this.cipher.encrypt(cblocks)));
+	console.log('xor', this.ivoffset);
+	console.log('iv', this.iv);
+	console.log('inp',input);
+	console.log('mas',mask);
 
         var output = [];
         for (var j = 0; j < input.length; j++) {
             output[j] = input[j] ^ mask[j];
         }
+	console.log('ret',output);
+
         this.ivoffset++;
         return output;
     },
@@ -89,13 +93,11 @@ falcon.cipher.prototype = {
         var output = [];
         var block_size = 16;
         for (var cur_block = 0; cur_block < input.length/block_size; cur_block++) {
-
-            var decoded = this.ctr_crypt_block( input.slice(cur_block * block_size, (cur_block + 1) * block_size ) );
-
+	    var block = input.slice(cur_block * block_size, (cur_block + 1) * block_size );
+            var decoded = this.ctr_crypt_block( block );
             for (var i=0; i < block_size; i++) {
                 output.push(decoded[i]);
             }
-
         }
         return output;
     },
@@ -187,6 +189,7 @@ falcon.cipher.prototype = {
      * decrypts a block of hex text from the client synchronously
      */
     decrypt: function(text, options) {
+	console.log('decrypt',text);
         var cipherBytes = this.hexToBytes(text);
         var plainBytes = this.ctr_crypt(cipherBytes);
         // remove trailing nul bytes
@@ -196,12 +199,12 @@ falcon.cipher.prototype = {
         } else {
             var r = this.bytesToUnicode(plainBytes);
         }
+	console.log('decrypt done');
         return r;
     },
     wordsToBytes: function(words, bytes) {
         var bitmask = 1;
         for (var i=0; i < 7; i++) bitmask = (bitmask << 1) | 1;
-
         for (var i=0; i < words.length; i++) {
             var bstart = i*4;
             for (var j=0; j < 4; j++) {
