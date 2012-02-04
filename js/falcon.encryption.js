@@ -70,16 +70,11 @@ falcon.cipher.prototype = {
         var hex = this.bytesToHex(ctr);
         cblocks = sjcl.codec.hex.toBits(hex);
         mask = this.hexToBytes(sjcl.codec.hex.fromBits(this.cipher.encrypt(cblocks)));
-	console.log('xor', this.ivoffset);
-	console.log('iv', this.iv);
-	console.log('inp',input);
-	console.log('mas',mask);
 
         var output = [];
         for (var j = 0; j < input.length; j++) {
             output[j] = input[j] ^ mask[j];
         }
-	console.log('ret',output);
 
         this.ivoffset++;
         return output;
@@ -189,7 +184,6 @@ falcon.cipher.prototype = {
      * decrypts a block of hex text from the client synchronously
      */
     decrypt: function(text, options) {
-	console.log('decrypt',text);
         var cipherBytes = this.hexToBytes(text);
         var plainBytes = this.ctr_crypt(cipherBytes);
         // remove trailing nul bytes
@@ -199,7 +193,6 @@ falcon.cipher.prototype = {
         } else {
             var r = this.bytesToUnicode(plainBytes);
         }
-	console.log('decrypt done');
         return r;
     },
     wordsToBytes: function(words, bytes) {
