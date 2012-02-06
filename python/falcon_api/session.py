@@ -143,7 +143,6 @@ class Request(object):
                 logging.error('no encryption sequence in response %s, %s' % (code, headers))
                 raise StopIteration
             cipher.ivoffset = int(headers['X-Bt-Seq'])
-            logging.info('got headers %s' % headers)
             encbody = body
             body = cipher.encrypt_pad(cipher.hex_to_ascii(body))
             body = cipher.remove_trailing_nulls( body )
