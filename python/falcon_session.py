@@ -16,6 +16,7 @@ import tornado.options
 import json
 import bitarray
 import urllib
+import random
 import time
 from hashlib import sha1
 from tornado.escape import utf8
@@ -24,16 +25,15 @@ from tornado.httputil import HTTPHeaders
 from tornado.escape import native_str
 import re
 from tornado.options import define, options
-#define('srp_root',default='http://192.168.56.1:9090')
-define('srp_root',default='https://remote-staging.utorrent.com')
+
+import srp
+
+define('srp_root',default='http://192.168.56.1:9090')
+#define('srp_root',default='https://remote-staging.utorrent.com')
 define('debug',default=True)
 tornado.options.parse_command_line()
 if options.debug:
     import pdb
-import random
-def random_hex(length):
-    chars = map(str,range(10)) + list('abcdef')
-    return ''.join([random.choice(chars) for _ in range(length)])
 
 def parse_headers(data):
     data = native_str(data.decode("latin1"))
@@ -156,9 +156,8 @@ def login(username, password, callback=None):
     session = response.body['guid']
     modulus, generator, salt = map(int,response.body['response'])
 
-    exponent = int(random_hex(40), 16)
-    public_key = pow(generator, exponent, modulus)
-    #logging.info('pub key %s' % public_key)
+    exponent, public_key = srp.create_public_key(modulus, generator, salt)
+
     args = { 'username': username,
              'pub': str(public_key),
              'time': int(time.time() * 1000),
@@ -175,47 +174,7 @@ def login(username, password, callback=None):
         logging.error('got invalid public key')
         raise StopIteration
 
-    kay = 3
-    u = int(sha1(long_to_bytes(public_key) + long_to_bytes(client_public_key)).hexdigest(), 16)
-
-    if u % modulus == 0:
-        logging.error('invalid exponent...')
-        raise StopIteration
-
-    userpassint = int(sha1( '%s:%s' % (username,password) ).hexdigest(),16)
-    passint = int( sha1( long_to_bytes(salt) + long_to_bytes( userpassint ) ).hexdigest(), 16 )
-
-    gtox = pow(generator, passint, modulus)
-
-    neg_gtox_kay = (modulus - gtox) * kay
-
-    key_base = (client_public_key + neg_gtox_kay) % modulus
-
-    key_exponent = exponent + (u * passint)
-    client_num = pow( key_base, key_exponent, modulus )
-    client_hash = sha1( long_to_bytes(client_num) ).hexdigest()
-    client_key = int(client_hash, 16)
-    
-    aeskey = hex(client_key)[2:-1] # remove 0x and L
-    if len(aeskey) < 40:
-        aeskey = '0' + aeskey
-    if len(aeskey) > 40:
-        aeskey = aeskey[:40]
-
-    def compute_verify_client_key():
-        xor_term = int(sha1(long_to_bytes(modulus)).hexdigest(),16) ^ int(sha1(long_to_bytes(generator)).hexdigest(),16)
-        A = public_key
-        B = client_public_key
-        M1_pre_hash = ''.join( [ long_to_bytes(xor_term),
-                                 long_to_bytes( int(sha1(username).hexdigest(),16) ),
-                                 long_to_bytes( salt ),
-                                 long_to_bytes( A ),
-                                 long_to_bytes( B ),
-                                 long_to_bytes( client_key ) ] )
-        M1 = int(sha1(M1_pre_hash).hexdigest(),16)
-        return M1
-
-    M1 = compute_verify_client_key()
+    aeskey, client_key, M1 = srp.verify_client_key(username, password, modulus, generator, salt, exponent, public_key, client_public_key)
     
     args = { 'username': username,
              'verify': M1,
@@ -239,7 +198,8 @@ def login(username, password, callback=None):
 
     M2 = int(response.body['response'][0])
     del response.body['response']
-    if M2 != compute_verify_M2():
+
+    if M2 != srp.verify(public_key, client_key, M1):
         logging.error('client password mismatch')
         raise StopIteration
 
