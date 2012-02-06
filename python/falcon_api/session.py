@@ -3,7 +3,6 @@
 import urlparse
 import logging
 import socket
-import sys
 import re
 import json
 import urllib
@@ -18,17 +17,18 @@ from tornado.escape import utf8, _unicode, native_str
 from tornado.util import b
 from tornado.httputil import HTTPHeaders
 from tornado import gen
-from tornado.options import define, options
 
 import srp
 from btcipher import Cipher
 from util import pad, parse_token
 from util import make_post_body, ascii_to_hex
-
-define('srp_root',default='http://192.168.56.1:9090')
-#define('srp_root',default='https://remote-staging.utorrent.com')
-define('debug',default=True)
+from tornado.options import options
 tornado.options.parse_command_line()
+if 'srp_root' in options:
+    SRP_ROOT = options.srp_root
+else:
+    SRP_ROOT = 'https://remote-staging.utorrent.com'
+
 if options.debug:
     import pdb
 
@@ -44,6 +44,11 @@ def parse_headers(data):
 def on_close():
     logging.error('stream close')
 
+class ErrorResponse(object):
+    def __init__(self, message):
+        self.error = True
+        self.message = message
+
 class Response(object):
     def __init__(self, code, headers, body):
         self.code = code
@@ -52,10 +57,12 @@ class Response(object):
         self.error = True if code >= 400 else False
 
 class Request(object):
-    def __init__(self, method, url, headers=None, body=None):
+    def __init__(self, method, url, headers=None, body=None, cipher=None, expectjson=None):
         self.method = method
         self.url = url
         self.body = body
+        self.cipher = cipher
+        self.expectjson = expectjson
         self.url_parsed = urlparse.urlsplit(url)
         secure = True if self.url_parsed.scheme == 'https' else False
         if self.url_parsed.netloc.find(':') != -1:
@@ -100,17 +107,27 @@ class Request(object):
         return toreturn
 
     @gen.engine
-    def make_request(request, expectjson=True, cipher=None, callback=None):
+    def make_request(self, expectjson=None, cipher=None, callback=None):
         # TODO -- use a connection pool
+        cipher = cipher or self.cipher
+
+        if self.expectjson is not None:
+            expectjson = self.expectjson
+        else:
+            if expectjson is None:
+                expectjson = True
+            else:
+                expectjson = expectjson
+
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
-        stream = tornado.iostream.SSLIOStream(s) if request._conn_secure else tornado.iostream.IOStream(s)
+        stream = tornado.iostream.SSLIOStream(s) if self._conn_secure else tornado.iostream.IOStream(s)
         stream._always_callback = True
-        addr = (request._conn_host, request._conn_port)
+        addr = (self._conn_host, self._conn_port)
         yield gen.Task( stream.connect, addr )
         if stream.error:
             logging.error('could not go :-(')
             raise StopIteration
-        yield gen.Task( stream.write, request.make_request_str(cipher=cipher) )
+        yield gen.Task( stream.write, self.make_request_str(cipher=cipher) )
         if stream.error:
             logging.error('could not go :-(')
             raise StopIteration
@@ -137,123 +154,118 @@ class Request(object):
             data = body
         callback( Response(code, headers, data) )
     
-@gen.engine
-def login(username, password, callback=None):
-    # TODO - invoke callback when errors occur
-    args = {'user': username}
-    request = Request('GET', '%s/api/login/?%s' % (options.srp_root, urllib.urlencode(args)))
-    response = yield gen.Task( request.make_request )
-    if response.error:
-        logging.error('response error')
-        raise StopIteration
 
-    if 'guid' not in response.body:
-        logging.error('response %s' % response.body)
-        raise StopIteration
-        
-    session = response.body['guid']
-    modulus, generator, salt = map(int,response.body['response'])
 
-    exponent, public_key = srp.create_public_key(modulus, generator, salt)
+class Session(object):
+    def __init__(self):
+        self.data = None
+        self.token = None
 
-    args = { 'username': username,
-             'pub': str(public_key),
-             'time': int(time.time() * 1000),
-             'GUID': session }
-    request = Request('GET', '%s/api/login/?%s' % (options.srp_root,urllib.urlencode(args)))
-    response = yield gen.Task( request.make_request )
-    if response.error:
-        logging.error('response error')
-        raise StopIteration
+    @gen.engine
+    def login(self, username, password, callback=None):
+        # TODO - invoke callback when errors occur
+        args = {'user': username}
+        request = Request('GET', '%s/api/login/?%s' % (options.srp_root, urllib.urlencode(args)))
+        response = yield gen.Task( request.make_request )
+        if response.error:
+            logging.error('response error')
+            raise StopIteration
 
-    client_public_key = int(response.body['response'][0])
+        if 'guid' not in response.body:
+            logging.error('response %s' % response.body)
+            raise StopIteration
+
+        session = response.body['guid']
+        modulus, generator, salt = map(int,response.body['response'])
+
+        exponent, public_key = srp.create_public_key(modulus, generator, salt)
+
+        args = { 'username': username,
+                 'pub': str(public_key),
+                 'time': int(time.time() * 1000),
+                 'GUID': session }
+        request = Request('GET', '%s/api/login/?%s' % (options.srp_root,urllib.urlencode(args)))
+        response = yield gen.Task( request.make_request )
+        if response.error:
+            logging.error('response error')
+            raise StopIteration
+
+        client_public_key = int(response.body['response'][0])
+
+        if client_public_key % modulus == 0:
+            logging.error('got invalid public key')
+            raise StopIteration
+
+        aeskey, client_key, M1 = srp.verify_client_key(username, password, modulus, generator, salt, exponent, public_key, client_public_key)
+
+        args = { 'username': username,
+                 'verify': M1,
+                 'time': int(time.time() * 1000),
+                 'GUID': session }
+        request = Request('GET', '%s/api/login/?%s' % (options.srp_root,urllib.urlencode(args)))
+        response = yield gen.Task( request.make_request )
+        if response.error:
+            logging.error('got verify response error')
+            raise StopIteration
+        if 'error' in response.body:
+            logging.error( response.body )
+            raise StopIteration
+
+        M2 = int(response.body['response'][0])
+        del response.body['response']
+
+        if M2 != srp.verify(public_key, client_key, M1):
+            logging.error('client password mismatch')
+            raise StopIteration
+
+        client_data = { 'key': aeskey,
+                        'guid': session
+                        }
+        client_data.update( response.body )
+
+        self.data = client_data
+        self.cipher = Cipher(client_data['key'])
+        if callback:
+            callback(client_data)
+
+    def get_auth_args(self):
+        return {'GUID': self.data['guid'],
+                'bt_talon_tkt': self.data['bt_talon_tkt']}
+
+    @gen.engine
+    def get_token(self, callback=None):
+        if not self.data:
+            callback( ErrorResponse("haven't logged in") )
+            raise StopIteration
+
+        args = self.get_auth_args()
+        url = '%s/client/gui/token.html?%s' % (self.data['host'], urllib.urlencode(args))
+        request = Request('GET',url, cipher=self.cipher, expectjson=False )
+        response = yield gen.Task( request.make_request )
+        self.token = parse_token(response.body)
+        callback(response)
     
-    if client_public_key % modulus == 0:
-        logging.error('got invalid public key')
-        raise StopIteration
+    @gen.engine
+    def request(self, method, base_url, url_params, body_params=None, callback=None):
+        if not self.data:
+            callback( ErrorResponse("haven't logged in") )
+            raise StopIteration
 
-    aeskey, client_key, M1 = srp.verify_client_key(username, password, modulus, generator, salt, exponent, public_key, client_public_key)
-    
-    args = { 'username': username,
-             'verify': M1,
-             'time': int(time.time() * 1000),
-             'GUID': session }
-    request = Request('GET', '%s/api/login/?%s' % (options.srp_root,urllib.urlencode(args)))
-    response = yield gen.Task( request.make_request )
-    if response.error:
-        logging.error('got verify response error')
-        raise StopIteration
-    if 'error' in response.body:
-        logging.error( response.body )
-        raise StopIteration
-
-    M2 = int(response.body['response'][0])
-    del response.body['response']
-
-    if M2 != srp.verify(public_key, client_key, M1):
-        logging.error('client password mismatch')
-        raise StopIteration
-
-    client_data = { 'key': aeskey,
-                    'guid': session
-                    }
-    client_data.update( response.body )
-    callback(client_data)
-
-
-@gen.engine
-def test_login():
-    username = sys.argv[1]
-    password = sys.argv[2]
-
-    result = yield gen.Task( login, username, password )
-    logging.info('login with result %s' % result)
-
-    args = { 'GUID': result['guid'],
-             'bt_talon_tkt': result['bt_talon_tkt'] }
-    url = '%s/client/gui/token.html?%s' % (result['host'], urllib.urlencode(args))
-
-    request = Request('GET', url)
-    cipher = Cipher(result['key'])
-
-    client_data = { 'key': result['key'],
-                    'bt_talon_tkt': result['bt_talon_tkt'],
-                    'bt_user': username,
-                    'host': options.srp_root,
-                    'guid': result['guid'] }
-
-    response = yield gen.Task( request.make_request, expectjson=False, cipher=cipher )
-    token = parse_token(response.body)
-    logging.info('got token %s' % token)
-
-    args = { 'list': 1 }
-    url = '%s/client/gui/?%s' % (result['host'], urllib.urlencode(args))
-
-    logging.info( 'request %s' % url )
-    headers, body = make_post_body(( { 'token': token, 't':int(time.time()*1000) } ))
-    headers['Cookie'] = 'GUID=%s; bt_talon_tkt=%s' % (result['guid'], result['bt_talon_tkt'])
-
-
-    old_style = True
-    if old_style:
-        request = Request('POST', url, headers = headers, body=body)
-        response = yield gen.Task( request.make_request, expectjson=True, cipher=cipher )
-        logging.info('list req response %s' % [response.body])
-
-        response = yield gen.Task( request.make_request, expectjson=True, cipher=cipher )
-        logging.info('list req response %s' % [response.body])
-    else:
-        args = { 'btapp': 'backbone.btapp.js' }
-
-        body_args = {}
-        json.dumps( body_args )
-
-        url = '%s/client/gui/?%s' % (result['host'], urllib.urlencode(args))
+        if not self.token:
+            yield gen.Task( self.get_token )
             
-        request = Request('POST', url, headers = headers, body=body)
 
+        args = self.get_auth_args()
+        if url_params:
+            args.update( url_params )
 
-if __name__ == '__main__':
-    ioloop = tornado.ioloop.IOLoop.instance()
-    test_login()
-    ioloop.start()
+        url = '%s%s?%s' % ( self.data['host'], base_url, urllib.urlencode(args) )
+
+        body_data = { 'token': self.token, 't':int(time.time()*1000) }
+        if body_params:
+            body_data.update( body_params )
+        headers, body = make_post_body( body_data )
+        headers['Cookie'] = 'GUID=%s; bt_talon_tkt=%s' % (self.data['guid'], self.data['bt_talon_tkt'])
+        request = Request(method, url, headers=headers, body=body, cipher=self.cipher)
+        response = yield gen.Task( request.make_request )
+        callback(response)
