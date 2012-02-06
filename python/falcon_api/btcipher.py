@@ -67,6 +67,12 @@ class Cipher:
         self.block_size = 16
         #self.cipher = AES.new( self.hex_to_ascii(key[:32]), AES.MODE_ECB )
 
+    def remove_trailing_nulls(self, data):
+        i = len(data) - 1
+        while data[i] == '\x00':
+            i -= 1
+        return data[:i+1]
+
     def hex_to_ascii(self, data):
         if len(data)%2 != 0:
             pdb.set_trace()
@@ -78,26 +84,12 @@ class Cipher:
     def encrypt(self, data):
         return self.cipher.decrypt(data)
 
-    def encrypt_pad_working(self, data):
-        padto = self.block_size * 4
-        if len(data) % padto != 0:
-            data = data + '\x00' * (padto - (len(data)%padto))
-        return self.encrypt(data)
-
     def encrypt_pad(self, data):
         padto = self.block_size * 4
+        toreturn = self.encrypt(data)
         if len(data) % padto != 0:
-            toreturn = self.encrypt(data)
-
-        self.encrypt( '\x00' * (padto - (len(data)%padto)) )
+            self.encrypt( '\x00' * (padto - (len(data)%padto)) )
         return toreturn
-
-    def encrypt_pad_old(self, data):
-        padto = self.block_size * 4
-        encbody = self.encrypt(data)
-        if len(encbody) % padto != 0:
-            encbody = encbody + '0' * (padto - (len(encbody)%padto))
-        return encbody
 
     def counter(self):
         ctr = self.iv[:]
