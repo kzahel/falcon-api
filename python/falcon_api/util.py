@@ -1,5 +1,8 @@
 import random
 import string
+import tornado.ioloop
+import time
+
 def random_string (length):
     return 'AaB03x'
     return ''.join (random.choice (string.letters) for ii in range (length + 1))
@@ -59,3 +62,6 @@ def parse_token(body):
 
 def ascii_to_hex(data):
     return ''.join([ pad( h[2:], 2, '0' ) for h in map(hex,map(ord,data)) ])
+
+def asyncsleep(t, callback=None):
+    tornado.ioloop.IOLoop.instance().add_timeout( time.time() + t, callback )

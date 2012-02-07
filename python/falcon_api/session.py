@@ -151,6 +151,8 @@ class Request(object):
             data = json.loads(body)
         else:
             data = body
+        if options.verbose > 0:
+            logging.info('%s %s %s?%s' % (self.method, code, self.url_parsed.path, self.url_parsed.query))
         callback( Response(code, headers, data) )
     
 
@@ -268,3 +270,4 @@ class Session(object):
         request = Request(method, url, headers=headers, body=body, cipher=self.cipher)
         response = yield gen.Task( request.make_request )
         callback(response)
+
