@@ -2,14 +2,14 @@ import sys
 import time
 import json
 import logging
-
+import random
 import tornado.options
 from tornado.options import define, options
 from tornado import gen
 
-#define('srp_root',default='http://192.168.56.1:9090')
+define('srp_root',default='http://192.168.56.1')
 #define('srp_root',default='https://remote-staging.utorrent.com')
-define('srp_root',default='https://remote.utorrent.com')
+#define('srp_root',default='https://remote.utorrent.com')
 define('debug',default=True)
 define('verbose',default=1, type=int)
 tornado.options.parse_command_line()
@@ -18,7 +18,7 @@ if options.debug:
 
 import tornado.ioloop
 from falcon_api.session import Session
-
+from falcon_api.util import asyncsleep
 @gen.engine
 def test_login():
     username = sys.argv[1]
@@ -27,16 +27,33 @@ def test_login():
     session = Session()
     result = yield gen.Task( session.login, username, password )
 
-    old_style = False
+    # check result..
+    old_style = True
     btappstr = 'testbtapp'
+    #torrent = 'http://www.clearbits.net/get/503-control-alt-deus---made-of-fire.torrent'
+    hash = ''.join([random.choice( list('abcdef') + map(str,range(10)) ) for _ in range(40)])
+    torrent = 'magnet:?xt=urn:btih:%s' % hash
 
     if old_style:
 
-        response = yield gen.Task( session.request, 'POST', '/client/gui/', { 'list': 1 } )
-        logging.info('list req response %s' % [response.body])
 
-        response = yield gen.Task( session.request, 'POST', '/client/gui/', { 'list': 1 } )
-        logging.info('list req response %s' % [response.body])
+        cid = None
+        count = 0
+        while count < 3:
+            count += 1
+            args = { 'list': 1 }
+            if cid:
+                args['cid'] = cid
+            response = yield gen.Task( session.request, 'POST', '/client/gui/', args )
+            if 'torrentc' in response.body:
+                cid = response.body['torrentc']
+            logging.info('list req response %s' % [response.body])
+            yield gen.Task(asyncsleep,1)
+
+
+        args = { 'action': 'add-url', 's': torrent }
+        response = yield gen.Task( session.request, 'POST', '/client/gui/', args )
+
 
     else:
         args = { 'btapp':btappstr,

@@ -247,7 +247,7 @@ class Session(object):
         callback(response)
     
     @gen.engine
-    def request(self, method, base_url, url_params, body_params=None, callback=None):
+    def request(self, method='POST', base_url='/client/gui/', url_params=None, body_params=None, callback=None):
         if not self.data:
             callback( ErrorResponse("haven't logged in") )
             raise StopIteration
