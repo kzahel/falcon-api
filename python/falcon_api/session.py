@@ -8,6 +8,7 @@ import json
 import urllib
 import random
 import time
+import random
 from hashlib import sha1
 
 import tornado.iostream
@@ -32,6 +33,12 @@ else:
 if options.debug:
     import pdb
 
+def random_cut(str):
+    if random.random() < 0.5:
+        return str[:random.randrange(0,len(str))]
+    else:
+        return str
+
 def parse_headers(data):
     data = native_str(data.decode("latin1"))
     first_line, _, header_data = data.partition("\n")
@@ -48,6 +55,8 @@ class ErrorResponse(object):
     def __init__(self, message):
         self.error = True
         self.message = message
+    def __repr__(self):
+        return '<ErrorResponse: %s>' % self.message
 
 class Response(object):
     def __init__(self, code, headers, body):
@@ -107,7 +116,7 @@ class Request(object):
         return toreturn
 
     @gen.engine
-    def make_request(self, expectjson=None, cipher=None, callback=None):
+    def make_request(self, expectjson=None, cipher=None, simulate_crappy_network=False, callback=None):
         # TODO -- use a connection pool
         cipher = cipher or self.cipher
 
@@ -125,22 +134,37 @@ class Request(object):
         addr = (self._conn_host, self._conn_port)
         yield gen.Task( stream.connect, addr )
         if stream.error:
-            logging.error('could not go :-(')
+            logging.error('could not connect to %s' % str(addr))
+            callback( ErrorResponse('could not connect') )
+            raise StopIteration
+        if simulate_crappy_network and random.random() < 0.1:
+            logging.info('simulate crap')
+            yield gen.Task( stream.write, random_cut(self.make_request_str(cipher=cipher)) )
+            stream.close()
+            callback( ErrorResponse('simulate crappy network') )
             raise StopIteration
         yield gen.Task( stream.write, self.make_request_str(cipher=cipher) )
         if stream.error:
-            logging.error('could not go :-(')
+            logging.error('could not write request')
+            callback( ErrorResponse('could not write request') )
             raise StopIteration
         rawheaders = yield gen.Task( stream.read_until, '\r\n\r\n' )
         code, headers = parse_headers(rawheaders)
+        if simulate_crappy_network and random.random() < 0.2:
+            yield gen.Task( stream.read_bytes, random.randrange(1, int(headers['Content-Length'])) )
+            stream.close()
+            callback( ErrorResponse('simulate hangup on body read') )
+            raise StopIteration
         body = yield gen.Task( stream.read_bytes, int(headers['Content-Length']) )
         stream.close()
         if not body:
+            callback( ErrorResponse('body not read') )
             logging.error('conn closed reading for body?')
             raise StopIteration
         if cipher:
             if 'X-Bt-Seq' not in headers:
                 logging.error('no encryption sequence in response %s, %s' % (code, headers))
+                callback( ErrorResponse('no enc seq found') )
                 raise StopIteration
             cipher.ivoffset = int(headers['X-Bt-Seq'])
             encbody = body
@@ -161,6 +185,7 @@ class Session(object):
     def __init__(self):
         self.data = None
         self.token = None
+        self._simulate_crappy_network = False # randomly close the stream at different times
 
     @gen.engine
     def login(self, username, password, callback=None):
@@ -268,6 +293,6 @@ class Session(object):
         headers, body = make_post_body( body_data )
         headers['Cookie'] = 'GUID=%s; bt_talon_tkt=%s' % (self.data['guid'], self.data['bt_talon_tkt'])
         request = Request(method, url, headers=headers, body=body, cipher=self.cipher)
-        response = yield gen.Task( request.make_request )
+        response = yield gen.Task( request.make_request, simulate_crappy_network=self._simulate_crappy_network )
         callback(response)
 

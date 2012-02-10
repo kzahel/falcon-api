@@ -53,8 +53,13 @@ class Torrent(object):
         self.data = data
         logging.info('init torrent %s' % self.get('name'))
     def update(self, data):
-        logging.info('updating torrent data %s' % self.serialize())
+        changed = []
+        for i,v in enumerate(data):
+            if v != self.data[i]:
+                changed.append((self.coldefs[i]['name'], self.data[i], v))
         self.data = data
+        changedstr = ', '.join( ['%s(%s -> %s)' % (c[0], c[1], c[2]) for c in changed] )
+        logging.info('updating torrent data %s, %s' % (self.get('name'), changedstr))
     def serialize(self):
         return dict( (self.coldefs[i]['name'], self.data[i]) for i in range(len(self.coldefs)) )
 
@@ -70,7 +75,6 @@ class Client(object):
         self.username = username
         self.password = password
         self.session = session or Session()
-        self._logging_in = False
 
         self.torrents = {}
 
@@ -83,16 +87,20 @@ class Client(object):
 
     @gen.engine
     def sync(self):
-        if not self._logging_in and self.session.data and self.username and self.password:
-            self._logging_in = True
+        if not self.session.data and self.username and self.password:
             logging.info('logging in')
             yield gen.Task( self.session.login, self.username, self.password )
 
+        self.session._simulate_crappy_network = True
         while True:
             args = { 'list': 1 }
             if self.cid:
                 args['cid'] = self.cid
-            response = yield gen.Task( self.session.request, 'POST', '/client/gui/', args )
+            response = yield gen.Task( self.session.request, url_params=args )
+            if response.error:
+                logging.error('error: %s' % response)
+                yield gen.Task( asyncsleep, 1 )
+                continue
             if 'torrentc' in response.body:
                 self.cid = response.body['torrentc']
 

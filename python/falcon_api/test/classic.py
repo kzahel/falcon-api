@@ -7,9 +7,9 @@ import tornado.options
 from tornado.options import define, options
 from tornado import gen
 
-#define('srp_root',default='http://192.168.56.1')
+define('srp_root',default='http://192.168.56.1')
 #define('srp_root',default='https://remote-staging.utorrent.com')
-define('srp_root',default='https://remote.utorrent.com')
+#define('srp_root',default='https://remote.utorrent.com')
 define('debug',default=True)
 define('verbose',default=1, type=int)
 tornado.options.parse_command_line()
@@ -25,9 +25,6 @@ from falcon_api.classic import Client
 def test_login():
     username = sys.argv[1]
     password = sys.argv[2]
-
-    session = Session()
-    result = yield gen.Task( session.login, username, password )
 
     # check result..
     #torrent = 'http://www.clearbits.net/get/503-control-alt-deus---made-of-fire.torrent'
