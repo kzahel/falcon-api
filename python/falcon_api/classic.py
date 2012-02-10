@@ -105,6 +105,7 @@ class Client(object):
                 self.cid = response.body['torrentc']
 
             if 'torrents' in response.body:
+                logging.info('response torrents %s' % len(response.body['torrents']))
                 for data in response.body['torrents']:
                     hash = data[0].lower()
                     if hash in self.torrents:
