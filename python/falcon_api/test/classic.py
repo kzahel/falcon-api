@@ -20,6 +20,9 @@ import tornado.ioloop
 from falcon_api.session import Session
 from falcon_api.util import asyncsleep
 from falcon_api.classic import Client
+import tornado.httpclient 
+
+httpclient = tornado.httpclient.AsyncHTTPClient(force_instance=True, max_clients=1)
 
 @gen.engine
 def test_login():
@@ -31,15 +34,53 @@ def test_login():
     hash = ''.join([random.choice( list('abcdef') + map(str,range(10)) ) for _ in range(40)])
     torrent = 'magnet:?xt=urn:btih:%s' % hash
 
-    client = Client(username, password)
-    client.sync()
-
-    yield gen.Task( asyncsleep, 4 )
+    for _ in range(1):
+        client = Client(username, password)
+        client.sync()
+        yield gen.Task( asyncsleep, 1 )
     #client.add_url(torrent)
 
-    for hash, torrent in client.torrents.items():
-        print torrent.get('name')
+    client.stop()
 
+    tasks = []
+    for hash, torrent in client.torrents.items():
+        if torrent.get('progress') == 1000:
+            tasks.append( gen.Task( torrent.fetch_files ) )
+            tasks.append( gen.Task( torrent.fetch_metadata ) )
+    responses = yield gen.Multi( tasks )
+    logging.info('responses %s' % [r.code for r in responses])
+
+    tasks = []
+    for hash, torrent in client.torrents.items():
+        if torrent.get('progress') == 1000:
+            for file in torrent.files:
+                link = file.webseed_link()
+                print link
+                request = tornado.httpclient.HTTPRequest(link,
+                                                         validate_cert=False)
+                tasks.append( gen.Task( httpclient.fetch, request ) )
+
+    while tasks:
+        some_tasks = [tasks.pop() for _ in range(5)]
+        logging.info('executing tasks of len %s' % len(some_tasks))
+        responses = yield gen.Multi( some_tasks )
+        logging.info('responses %s' % [(r.code, len(r.body)) for r in responses])
+
+
+
+    if False:
+        tasks = []
+        for hash, torrent in client.torrents.items():
+            if torrent.get('progress') == 1000:
+                link = torrent.webseed_link()
+
+                print torrent.get('name'), torrent.get('progress'), link
+
+                request = tornado.httpclient.HTTPRequest(link,
+                                                         validate_cert=False)
+                tasks.append( gen.Task( httpclient.fetch, request ) )
+        responses = yield gen.Multi( tasks )
+        logging.info('responses %s' % [r.code for r in responses])
 
 if __name__ == '__main__':
     ioloop = tornado.ioloop.IOLoop.instance()
