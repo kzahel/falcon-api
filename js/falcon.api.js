@@ -185,8 +185,13 @@
                      failure_callback(xhr, status, 'invalid request');
                  }
                  console.error('client says invalid request');
+             } else if (data.error) {
+                 if (failure_callback) {
+                     failure_callback(xhr, status, data);
+                 }
              } else {
                  if (request.url.match('/gui/token.html')) {
+
                      // token is not returned via JSON and returned differently for JSONP :-(
                      data = _this.decrypt_response(data, status, xhr, { encoding: 'ascii' } );
                      if (_this.jsonp) {
