@@ -214,6 +214,7 @@ falcon.cipher.prototype = {
     },
     hexDigits: '0123456789ABCDEF',
     byteToHex: function(n) {
+        // investigate .toString(16) speed
         return (this.hexDigits.charAt(n >> 4) + this.hexDigits.charAt(n & 15));
     },
     bytesToHex: function(bytes) {

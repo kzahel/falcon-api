@@ -44,17 +44,17 @@ falcon.session = function(options) {
 }
 
 falcon.session.prototype = {
-    request: function(uri, url_params, body_params, callback) {
+    request: function(uri, url_params, body_params, callback, errback) {
         if (! this._token_fetched) {
             if (! this._token_fetching) {
                 console.log('fetching token');
                 this.api.request('GET', '/client/gui/token.html', {}, {}, _.bind(this.token_fetched,this));
                 this._token_fetching = true;
             }
-            var thislater = _.bind(this.request, this, uri, url_params, body_params, callback);
+            var thislater = _.bind(this.request, this, uri, url_params, body_params, callback, errback);
             this._pending_requests.push(thislater);
         } else {
-            this.api.request( 'GET', '/client' + uri, url_params, body_params, callback );
+            this.api.request( 'GET', '/client' + uri, url_params, body_params, callback, errback );
         }
     },
     token_fetched: function(resp) {
