@@ -330,6 +330,7 @@ falcon.session.prototype = {
                 _this.api = api;
 
                 if (this.options && this.options.success) {
+                    this.clear();
                     this.options.success( this );
                 }
             }
@@ -339,5 +340,19 @@ falcon.session.prototype = {
     },
     serialize: function() {
 	return this.api.client_data;
+    },
+    clear: function() {
+        // clear intermediate negotiation stuff
+        delete this.M1;
+        delete this.client_key;
+        delete this.client_key_str;
+        delete this.exponent;
+        delete this.generator;
+        delete this.guid;
+        delete this.modulus;
+        delete this.public_key;
+        delete this.salt;
+        delete this.server_key;
+        delete this.username;
     }
 }
