@@ -92,8 +92,9 @@
                      //xhr.setRequestHeader("x-bt-seq", xbtseq); // send this as a query parameter instead.
                  },
                  error: function(xhr, status, text) {
-                     if (_this.jsonp) {
+                     if (_this.jsonp && status != 'timeout') {
                          console.error('BAD! always expect 200 responses from raptor');
+                         debugger;
                      }
                      if (failure_callback) {
                          failure_callback(xhr, status, text);

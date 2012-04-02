@@ -36,6 +36,7 @@ falcon.session = function(options) {
     this.api = null;
     this._token_fetching = false;
     this._token_fetched = false;
+    this._token_fetch_fail = false;
     this._pending_requests = [];
 
     if (options && options.client_data) {
@@ -44,18 +45,29 @@ falcon.session = function(options) {
 }
 
 falcon.session.prototype = {
-    request: function(uri, url_params, body_params, callback, errback) {
+    request: function(uri, url_params, body_params, callback, errback, opts) {
         if (! this._token_fetched) {
             if (! this._token_fetching) {
                 console.log('fetching token');
-                this.api.request('GET', '/client/gui/token.html', {}, {}, _.bind(this.token_fetched,this), errback);
+                this.api.request('GET', '/client/gui/token.html', {}, {}, _.bind(this.token_fetched,this), _.bind(this.token_fetch_fail, this));
                 this._token_fetching = true;
             }
-            var thislater = _.bind(this.request, this, uri, url_params, body_params, callback, errback);
+            var thislater = _.bind(this.request, this, uri, url_params, body_params, callback, errback, opts);
             this._pending_requests.push(thislater);
         } else {
-            this.api.request( 'GET', '/client' + uri, url_params, body_params, callback, errback );
+            if (this._token_fetch_fail) {
+                errback(null, 'error', { error: 'error fetching token' });
+            } else {
+                this.api.request( 'GET', '/client' + uri, url_params, body_params, callback, errback, opts );
+            }
         }
+    },
+    token_fetch_fail: function(resp) {
+        this._token_fetched = true;
+        this._token_fetch_fail = true;
+        this._token_fetching = false;
+        _.each( this._pending_requests, function(req) { req(); } );
+        this._pending_requests = [];
     },
     token_fetched: function(resp) {
         this._token_fetched = true;
@@ -99,6 +111,13 @@ falcon.session.prototype = {
         debugger;
         this.error_out(xhr, status, text);
     },
+    check_username: function(username, options) {
+        jQuery.ajax( { url: config.srp_root + '/api/exists?username=' + encodeURIComponent(username),
+                       success: options.success,
+                       error: options.error,
+                       dataType: 'jsonp'
+                     });
+    },
     /** @private **/
     get_srp_url: function(data, newsession) {
         var url = config.srp_root + '/api/login/'; // needs trailing slash
@@ -133,6 +152,7 @@ falcon.session.prototype = {
         jQuery.ajax(this.get_srp_url(data, true), { 
                         dataType: 'jsonp',
                         cached: false,
+            timeout: (options && options.timeout),
                         error: _.bind(this.jsonp_error, this),
                         success: _.bind(this.create_public_key, this) } );
     },
