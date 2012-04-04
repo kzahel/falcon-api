@@ -37,6 +37,7 @@ falcon.session = function(options) {
     this._token_fetching = false;
     this._token_fetched = false;
     this._token_fetch_fail = false;
+    this._token_fetch_fail_data = null;
     this._pending_requests = [];
 
     if (options && options.client_data) {
@@ -46,7 +47,7 @@ falcon.session = function(options) {
 
 falcon.session.prototype = {
     request: function(uri, url_params, body_params, callback, errback, opts) {
-        if (! this._token_fetched) {
+        if (! this._token_fetched && ! uri.match('/gui/token.html')) {
             if (! this._token_fetching) {
                 console.log('fetching token');
                 this.api.request('GET', '/client/gui/token.html', {}, {}, _.bind(this.token_fetched,this), _.bind(this.token_fetch_fail, this));
@@ -56,15 +57,17 @@ falcon.session.prototype = {
             this._pending_requests.push(thislater);
         } else {
             if (this._token_fetch_fail) {
-                errback(null, 'error', { error: 'error fetching token' });
+                var data = this._token_fetch_fail_data;
+                errback(data.xhr, data.status, data.text);
             } else {
                 this.api.request( 'GET', '/client' + uri, url_params, body_params, callback, errback, opts );
             }
         }
     },
-    token_fetch_fail: function(resp) {
+    token_fetch_fail: function(xhr, status, text) {
         this._token_fetched = true;
         this._token_fetch_fail = true;
+        this._token_fetch_fail_data = { xhr: xhr, status: status, text: text };
         this._token_fetching = false;
         _.each( this._pending_requests, function(req) { req(); } );
         this._pending_requests = [];

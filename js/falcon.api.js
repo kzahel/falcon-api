@@ -58,10 +58,6 @@
 		 var post_body = null;
 		 var encrypted_body = null;
 	     }
-
-
-
-
              
              if (options && options.timeout) {
                  var timeout = options.timeout;
@@ -187,6 +183,11 @@
                  }
                  console.error('client says invalid request');
              } else if (data.error) {
+                 if (data.error == 'client timeout') {
+                     // it may make sense to call the "getrapton" API
+                     // call here, in case the client has re-attached
+                     // and our client_data.host is out of date.
+                 }
                  if (failure_callback) {
                      failure_callback(xhr, status, data);
                  }
