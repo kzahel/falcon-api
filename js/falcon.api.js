@@ -247,7 +247,7 @@
                  }
              } else {
                  if (failure_callback) {
-                     failure_callback(xhr, status, 'invalid json: ' + decrypted_data);
+                     failure_callback(xhr, status, {'error':'invalid JSON', data:decrypted_data});
                  }
              }
          }
