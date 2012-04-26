@@ -344,10 +344,12 @@ falcon.session.prototype = {
                                     bt_user: _this.username,
                                     cid: data.cid,
                                     host: data.host,
+                                    ip: data.ip,
                                     guid: guid,
                                     agent: data.agent,
 				    api: '2.0'
                                   };
+
 
                 console.log('log in success with client data',client_data);
                 var api = new falcon.api(client_data);
