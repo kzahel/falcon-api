@@ -340,6 +340,7 @@ falcon.session.prototype = {
                 var guid = _this.guid;
                 var client_data = { key: this.client_key_str,
                                     bt_talon_tkt: tkt,
+                                    port: data.port,
                                     bt_user: _this.username,
                                     cid: data.cid,
                                     host: data.host,
