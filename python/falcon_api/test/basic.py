@@ -44,7 +44,7 @@ def test_login():
             args = { 'list': 1 }
             if cid:
                 args['cid'] = cid
-            response = yield gen.Task( session.request, 'POST', '/client/gui/', args )
+            response = yield gen.Task( session.request, 'POST', args )
             if 'torrentc' in response.body:
                 cid = response.body['torrentc']
             logging.info('list req response %s' % [response.body])
@@ -52,7 +52,7 @@ def test_login():
 
 
         args = { 'action': 'add-url', 's': torrent }
-        response = yield gen.Task( session.request, 'POST', '/client/gui/', args )
+        response = yield gen.Task( session.request, 'POST', args )
 
 
     else:
@@ -90,7 +90,7 @@ def test_login():
                   'queries': json.dumps(['btapp/settings/set(%s)/' % json.dumps(['dna.server_prefix','woobmpp'])])
                  }
         response = yield gen.Task( session.request, 
-                                   'POST', '/client/gui/', 
+                                   'POST', 
                                    None, args )
 
         logging.info('btapp set response %s' % response.code)

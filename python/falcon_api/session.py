@@ -66,13 +66,15 @@ class Response(object):
         self.error = True if code >= 400 else False
 
 class Request(object):
-    def __init__(self, method, url, headers=None, body=None, cipher=None, expectjson=None):
+    def __init__(self, method, url, headers=None, body=None, cipher=None, expectjson=None, jsonp=True):
+        self.jsonp = jsonp
         self.method = method
         self.url = url
         self.body = body
         self.cipher = cipher
         self.expectjson = expectjson
         self.url_parsed = urlparse.urlsplit(url)
+        self.url_parsed.use_query = self.url_parsed.query # .query is read only attribute
         secure = True if self.url_parsed.scheme == 'https' else False
         if self.url_parsed.netloc.find(':') != -1:
             host, port = self.url_parsed.netloc.split(':')
@@ -85,24 +87,41 @@ class Request(object):
         self._conn_port = port
         self._conn_secure = secure
 
+        self.addr = (self._conn_host, self._conn_port)
+
         self.headers = headers or {}
 
     def make_request_str(self, cipher=None):
+        ivoffset = str(cipher.ivoffset) if cipher else None
+        body = None
+
         if self.body:
             if cipher:
-                self.headers['x-bt-seq'] = str(cipher.ivoffset)
                 body = ascii_to_hex( cipher.encrypt_pad( self.body ) ).upper()
             else:
                 body = self.body
+            if self.jsonp:
+                # modify url...
+                if self.url_parsed.use_query:
+                    self.url_parsed.use_query += ('&encbody=%s&x_bt_seq=%s' % (body, ivoffset))
+                    #self.url_parsed.use_query += ('&encbody=%s' % body)
+                    #self.headers['x-bt-seq'] = str(cipher.ivoffset)
+                body = None
+            else:
+                self.headers['x-bt-seq'] = ivoffset
+
+        if body:
             self.headers['Content-Length'] = str(len(body))
             return self.make_request_headers() + body
         else:
             self.headers['Content-Length'] = str(0)
             return self.make_request_headers()
 
-    def make_request_headers(self):
-        if self.url_parsed.query:
-            uri = '%s?%s' % (self.url_parsed.path, self.url_parsed.query)
+    def make_request_headers(self, cipher=None):
+        if self.url_parsed.use_query:
+            uri = '%s?%s' % (self.url_parsed.path, self.url_parsed.use_query)
+            if cipher:
+                uri += '&x_bt_seq=%s' % cipher.ivoffset
         else:
             uri = self.url_parsed.path
         request_lines = [utf8("%s %s HTTP/1.1" % (self.method,
@@ -143,13 +162,17 @@ class Request(object):
             stream.close()
             callback( ErrorResponse('simulate crappy network') )
             raise StopIteration
-        yield gen.Task( stream.write, self.make_request_str(cipher=cipher) )
+        req = self.make_request_str(cipher=cipher)
+        logging.info('make request %s %s' % (addr, req))
+        yield gen.Task( stream.write, req )
         if stream.error:
             logging.error('could not write request')
             callback( ErrorResponse('could not write request') )
             raise StopIteration
         rawheaders = yield gen.Task( stream.read_until, '\r\n\r\n' )
         code, headers = parse_headers(rawheaders)
+        if not code or not headers and options.debug:
+            pdb.set_trace()
         if simulate_crappy_network and random.random() < 0.2:
             yield gen.Task( stream.read_bytes, random.randrange(1, int(headers['Content-Length'])) )
             stream.close()
@@ -164,6 +187,7 @@ class Request(object):
         if cipher:
             if 'X-Bt-Seq' not in headers:
                 logging.error('no encryption sequence in response %s, %s' % (code, headers))
+                pdb.set_trace()
                 callback( ErrorResponse('no enc seq found') )
                 raise StopIteration
             cipher.ivoffset = int(headers['X-Bt-Seq'])
@@ -176,7 +200,7 @@ class Request(object):
         else:
             data = body
         if options.verbose > 0:
-            logging.info('%s %s %s?%s' % (self.method, code, self.url_parsed.path, self.url_parsed.query))
+            logging.info('%s %s %s?%s' % (self.method, code, self.url_parsed.path, self.url_parsed.use_query))
         callback( Response(code, headers, data) )
     
 
@@ -186,6 +210,15 @@ class Session(object):
         self.data = None
         self.token = None
         self._simulate_crappy_network = False # randomly close the stream at different times
+        self._direct = False
+        self._use_cookie = False
+        self.cipher = None
+
+    def enable_direct(self):
+        self._direct = True
+
+    def debug(self):
+        logging.info('debug %s cipher %s' % (self, self.cipher.ivoffset))
 
     @gen.engine
     def login(self, username, password, callback=None):
@@ -255,24 +288,43 @@ class Session(object):
             callback(client_data)
 
     def get_auth_args(self):
-        return {'GUID': self.data['guid'],
-                'bt_talon_tkt': self.data['bt_talon_tkt']}
+        args = {'GUID': self.data['guid']}
+        if not self._direct:
+            args['bt_talon_tkt'] = self.data['bt_talon_tkt']
+        #if self.token:
+        #    args['token'] = self.token
+        return args
+
+    def get_base_url(self):
+        if self._direct:
+            return '/gui/'
+        else:
+            return '/client/gui/'
+
+    def get_host(self):
+        if self._direct:
+            return 'http://%s:%s' % (self.data['ip'], self.data['port'])
+        else:
+            return self.data['host']
 
     @gen.engine
-    def get_token(self, callback=None):
+    def get_token(self, direct=False, callback=None):
         if not self.data:
             callback( ErrorResponse("haven't logged in") )
             raise StopIteration
 
         args = self.get_auth_args()
-        url = '%s/client/gui/token.html?%s' % (self.data['host'], urllib.urlencode(args))
+        if direct:
+            url = '%s%stoken.html?%s' % (self.get_host(), self.get_base_url(), urllib.urlencode(args))
+        else:
+            url = '%s%stoken.html?%s' % (self.data['host'], '/client/gui/', urllib.urlencode(args))
         request = Request('GET',url, cipher=self.cipher, expectjson=False )
         response = yield gen.Task( request.make_request )
         self.token = parse_token(response.body)
         callback(response)
     
     @gen.engine
-    def request(self, method='POST', base_url='/client/gui/', url_params=None, body_params=None, callback=None):
+    def request(self, method='POST', url_params=None, body_params=None, jsonp=True, callback=None):
         if not self.data:
             callback( ErrorResponse("haven't logged in") )
             raise StopIteration
@@ -282,17 +334,30 @@ class Session(object):
             
 
         args = self.get_auth_args()
+
+        if self._use_cookie:
+            headers['Cookie'] = 'GUID=%s; bt_talon_tkt=%s' % (self.data['guid'], self.data['bt_talon_tkt'])
+
         if url_params:
             args.update( url_params )
 
-        url = '%s%s?%s' % ( self.data['host'], base_url, urllib.urlencode(args) )
+        url = '%s%s?%s' % ( self.get_host(), self.get_base_url(), urllib.urlencode(args) )
 
-        body_data = { 'token': self.token, 't':int(time.time()*1000) }
+        if self.token:
+            body_data = { 'token': self.token, 't':int(time.time()*1000) }
+            #body_data = { 'token': self.token }
+        else:
+            pdb.set_trace()
+        #body_data = { 't':int(time.time()*1000) }
         if body_params:
             body_data.update( body_params )
+        #logging.info('encrypting body data %s %s' % (self.cipher.ivoffset, body_data))
         headers, body = make_post_body( body_data )
-        headers['Cookie'] = 'GUID=%s; bt_talon_tkt=%s' % (self.data['guid'], self.data['bt_talon_tkt'])
-        request = Request(method, url, headers=headers, body=body, cipher=self.cipher)
+        #logging.info('making post body %s' % body)
+        if jsonp:
+            headers = None
+
+        request = Request(method, url, headers=headers, body=body, cipher=self.cipher, jsonp=jsonp)
         response = yield gen.Task( request.make_request, simulate_crappy_network=self._simulate_crappy_network )
         callback(response)
 

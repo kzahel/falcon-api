@@ -26,7 +26,7 @@ def encode_multipart_data(data):
     return headers, body
 
 
-boundary = 'AaX03x'
+boundary = 'AaB03x'
 
 def make_part(v,k):
     return 'Content-Disposition: multipart/form-data; name="' + k + '"\r\n\r\n' + str(v) + '\r\n';

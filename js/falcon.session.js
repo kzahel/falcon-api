@@ -347,7 +347,7 @@ falcon.session.prototype = {
                                     ip: data.ip,
                                     guid: guid,
                                     agent: data.agent,
-				    api: '2.0'
+				    api: '2.1'
                                   };
 
 
