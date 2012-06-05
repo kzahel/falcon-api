@@ -9,6 +9,7 @@ import urllib
 import random
 import time
 import random
+import Cookie
 from hashlib import sha1
 
 import tornado.iostream
@@ -186,7 +187,7 @@ class Request(object):
             raise StopIteration
         if cipher:
             if 'X-Bt-Seq' not in headers:
-                logging.error('no encryption sequence in response %s, %s' % (code, headers))
+                logging.error('no encryption sequence in response %s, %s, %s' % (code, headers, body))
                 pdb.set_trace()
                 callback( ErrorResponse('no enc seq found') )
                 raise StopIteration
@@ -213,6 +214,14 @@ class Session(object):
         self._direct = False
         self._use_cookie = False
         self.cipher = None
+        self.endpoint = '/api/login'
+        self.srp_direct = False
+
+    def get_server_root(self):
+        if self.srp_direct:
+            return self.srp_direct
+        else:
+            return options.srp_root
 
     def enable_direct(self):
         self._direct = True
@@ -224,18 +233,24 @@ class Session(object):
     def login(self, username, password, callback=None):
         # TODO - invoke callback when errors occur
         args = {'user': username}
-        request = Request('GET', '%s/api/login/?%s' % (options.srp_root, urllib.urlencode(args)))
+        request = Request('GET', '%s%s/?%s' % (self.get_server_root(), self.endpoint, urllib.urlencode(args)))
         response = yield gen.Task( request.make_request )
         if response.error:
             logging.error('response error')
             raise StopIteration
 
-        if 'guid' not in response.body:
+        if  'guid' in response.body:
+            session = response.body['guid']
+            respbody = response.body['response']
+        elif 'Set-Cookie' in response.headers:
+            session = Cookie.Cookie(response.headers['set-cookie'])['GUID'].value
+            respbody = response.body
+        
+        if not session:
             logging.error('response %s' % response.body)
             raise StopIteration
-
-        session = response.body['guid']
-        modulus, generator, salt = map(int,response.body['response'])
+        
+        modulus, generator, salt = map(int,respbody)
 
         exponent, public_key = srp.create_public_key(modulus, generator, salt)
 
@@ -243,13 +258,18 @@ class Session(object):
                  'pub': str(public_key),
                  'time': int(time.time() * 1000),
                  'GUID': session }
-        request = Request('GET', '%s/api/login/?%s' % (options.srp_root,urllib.urlencode(args)))
+        request = Request('GET', '%s%s/?%s' % (self.get_server_root(), self.endpoint, urllib.urlencode(args)))
         response = yield gen.Task( request.make_request )
         if response.error:
             logging.error('response error')
             raise StopIteration
 
-        client_public_key = int(response.body['response'][0])
+
+        if 'response' in response.body:
+            respbody = response.body['response']
+        else:
+            respbody = response.body
+        client_public_key = int(respbody[0])
 
         if client_public_key % modulus == 0:
             logging.error('got invalid public key')
@@ -261,7 +281,7 @@ class Session(object):
                  'verify': M1,
                  'time': int(time.time() * 1000),
                  'GUID': session }
-        request = Request('GET', '%s/api/login/?%s' % (options.srp_root,urllib.urlencode(args)))
+        request = Request('GET', '%s%s/?%s' % (self.get_server_root(), self.endpoint, urllib.urlencode(args)))
         response = yield gen.Task( request.make_request )
         if response.error:
             logging.error('got verify response error')
@@ -270,8 +290,12 @@ class Session(object):
             logging.error( response.body )
             raise StopIteration
 
-        M2 = int(response.body['response'][0])
-        del response.body['response']
+        if 'response' in response.body:
+            respbody = response.body['response']
+            del response.body['response']
+        else:
+            respbody = response.body
+        M2 = int(respbody[0])
 
         if M2 != srp.verify(public_key, client_key, M1):
             logging.error('client password mismatch')
@@ -280,7 +304,9 @@ class Session(object):
         client_data = { 'key': aeskey,
                         'guid': session
                         }
-        client_data.update( response.body )
+
+        if type(response.body) == type({}):
+            client_data.update( response.body )
 
         self.data = client_data
         self.cipher = Cipher(client_data['key'])
@@ -302,10 +328,12 @@ class Session(object):
             return '/client/gui/'
 
     def get_host(self):
-        if self._direct:
+        if 'ip' in self.data and self._direct:
             return 'http://%s:%s' % (self.data['ip'], self.data['port'])
-        else:
+        elif 'host' in self.data:
             return self.data['host']
+        else:
+            return options.server_address
 
     @gen.engine
     def get_token(self, direct=False, callback=None):
@@ -314,10 +342,7 @@ class Session(object):
             raise StopIteration
 
         args = self.get_auth_args()
-        if direct:
-            url = '%s%stoken.html?%s' % (self.get_host(), self.get_base_url(), urllib.urlencode(args))
-        else:
-            url = '%s%stoken.html?%s' % (self.data['host'], '/client/gui/', urllib.urlencode(args))
+        url = '%s%stoken.html?%s' % (self.get_host(), self.get_base_url(), urllib.urlencode(args))
         request = Request('GET',url, cipher=self.cipher, expectjson=False )
         response = yield gen.Task( request.make_request )
         self.token = parse_token(response.body)
