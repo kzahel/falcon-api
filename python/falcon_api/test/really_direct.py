@@ -49,7 +49,7 @@ def test_login():
 
     cid = None
     count = 0
-    while count < 1:
+    while count < 10:
         count += 1
         #url_args = {'list':1}
         url_args = None
@@ -66,7 +66,7 @@ def test_login():
         assert response.code == 200
 
     logging.info('woot!')
-    pdb.set_trace()
+
     ioloop.stop()
     #args = { 'action': 'add-url', 's': torrent }
     #response = yield gen.Task( session.request, 'GET', None, args )

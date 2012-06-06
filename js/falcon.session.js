@@ -40,6 +40,7 @@ falcon.session = function(options) {
     this._token_fetch_fail_data = null;
     this._pending_requests = [];
 
+    this.options = options || {};
     if (options && options.client_data) {
 	this.api = new falcon.api(options.client_data);
     }
@@ -47,10 +48,12 @@ falcon.session = function(options) {
 
 falcon.session.prototype = {
     request: function(uri, url_params, body_params, callback, errback, opts) {
+        var prefix = this.options.direct ? '' : '/client';
         if (! this._token_fetched && ! uri.match('/gui/token.html')) {
             if (! this._token_fetching) {
                 console.log('fetching token');
-                this.api.request('GET', '/client/gui/token.html', {}, {}, _.bind(this.token_fetched,this), _.bind(this.token_fetch_fail, this));
+                var token_url = prefix + '/gui/token.html';
+                this.api.request('GET', token_url, {}, {}, _.bind(this.token_fetched,this), _.bind(this.token_fetch_fail, this));
                 this._token_fetching = true;
             }
             var thislater = _.bind(this.request, this, uri, url_params, body_params, callback, errback, opts);
@@ -60,7 +63,7 @@ falcon.session.prototype = {
                 var data = this._token_fetch_fail_data;
                 errback(data.xhr, data.status, data.text);
             } else {
-                this.api.request( 'GET', '/client' + uri, url_params, body_params, callback, errback, opts );
+                this.api.request( 'GET', prefix + uri, url_params, body_params, callback, errback, opts );
             }
         }
     },
@@ -123,7 +126,11 @@ falcon.session.prototype = {
     },
     /** @private **/
     get_srp_url: function(data, newsession) {
-        var url = config.srp_root + '/api/login/'; // needs trailing slash
+        if (this.options.direct) {
+            var url = 'http://' + this.options.direct + '/gui/srp/';
+        } else {
+            var url = config.srp_root + '/api/login/'; // needs trailing slash
+        }
 
         if (newsession) {
             url = url + '?new=1';
@@ -143,7 +150,7 @@ falcon.session.prototype = {
      * @param Object negotiation options. Pass in "success" "error" callback functions.
      *  **/
     negotiate: function(username, password, options) {
-        this.options = options;
+        _.extend( this.options, options );
         this.credentials = {username: username, password: password};
         this.username = username;
         var data = {
@@ -173,7 +180,7 @@ falcon.session.prototype = {
             return this.error_out(xhr, status, data);
         }
         this.guid = data.guid;
-        var response = data.response;
+        var response = data.response || data;
 
         if (! response.length || response.length != 3) {
             console.error('public key response makes no sense', response);
@@ -336,7 +343,12 @@ falcon.session.prototype = {
             _this.set_label("Verification complete!");
 
             var tkt = data.bt_talon_tkt;
-            if (tkt) {
+            if (this.options && this.options.direct) {
+                var client_data = { key: this.client_key_str,
+                                    guid: this.guid,
+                                    direct: this.options.direct
+                                  };
+            } else if (tkt) {
                 var guid = _this.guid;
                 var client_data = { key: this.client_key_str,
                                     bt_talon_tkt: tkt,
@@ -349,17 +361,15 @@ falcon.session.prototype = {
                                     agent: data.agent,
 				    api: '2.1'
                                   };
-
-
-                console.log('log in success with client data',client_data);
-                var api = new falcon.api(client_data);
-                _this.api = api;
-
-                if (this.options && this.options.success) {
-                    this.clear();
-                    this.options.success( this );
-                }
             }
+            console.log('log in success with client data',client_data);
+            var api = new falcon.api(client_data);
+            _this.api = api;
+            if (this.options && this.options.success) {
+                this.clear();
+                this.options.success( this );
+            }
+
         } else {
             _this.error_out(xhr, status, "Password invalid");
         }

@@ -44,7 +44,11 @@
              } else {
                  var url = base_url + "?" + _this.make_request_url(url_params);
              }
-             if (this.jsonp) { url = this.client_data.host + url; }
+             if (this.client_data.direct) {
+                 url = 'http://' + this.client_data.direct + url;
+             } else if (this.jsonp) { 
+                 url = this.client_data.host + url; 
+             }
 
 	     if (_this.token) {
 		 var data = _.extend({
@@ -67,7 +71,10 @@
 
              if (this.jsonp) { 
                  method = 'GET'; 
-                 url = url + '&GUID=' + this.client_data.guid + '&bt_talon_tkt=' + encodeURIComponent(this.client_data.bt_talon_tkt);
+                 url = url + '&GUID=' + this.client_data.guid;
+                 if (this.client_data.bt_talon_tkt) {
+                     url = url + '&bt_talon_tkt=' + encodeURIComponent(this.client_data.bt_talon_tkt);
+                 }
 		 if (encrypted_body) {
 		     url = url + '&encbody=' + encrypted_body + '&x_bt_seq=' + xbtseq;
 		 }
@@ -234,7 +241,8 @@
                  // if this fails, fall back to ASCII
                  json = jQuery.parseJSON(decrypted_data);
              } catch (e) {
-                 console.error('utf 8 decoding failed');
+                 console.error('utf 8 decoding failed or non JSON response');
+                 debugger;
              }
              if (json) {
                  if (json.error) {
