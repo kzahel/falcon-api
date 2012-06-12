@@ -53,7 +53,7 @@ falcon.session.prototype = {
             if (! this._token_fetching) {
                 console.log('fetching token');
                 var token_url = prefix + '/gui/token.html';
-                this.api.request('GET', token_url, {}, {}, _.bind(this.token_fetched,this), _.bind(this.token_fetch_fail, this));
+                this.api.request('GET', token_url, {}, {t:0}, _.bind(this.token_fetched,this), _.bind(this.token_fetch_fail, this));
                 this._token_fetching = true;
             }
             var thislater = _.bind(this.request, this, uri, url_params, body_params, callback, errback, opts);

@@ -39,10 +39,16 @@
          request: function(method, base_url, url_params, body_params, callback, failure_callback, options) {
              var _this = this;
 
-             if (_.isString(url_params)) {
+             if (_.isString(url_params) && url_params) {
                  var url = base_url + "?" + url_params;
              } else {
-                 var url = base_url + "?" + _this.make_request_url(url_params);
+                 if (url_params && _.keys(url_params).length > 0) {
+                     url_params = _this.make_request_url(url_params);
+                     var url = base_url + "?" + url_params;
+                 } else {
+                     var url = base_url;
+                     url_params = null;
+                 }
              }
              if (this.client_data.direct) {
                  url = 'http://' + this.client_data.direct + url;
@@ -59,8 +65,17 @@
 		 var xbtseq = _this.cipher.ivoffset; // GRAB this before encrypting!!!
 		 var encrypted_body = _this.cipher.encrypt( post_body );
 	     } else {
-		 var post_body = null;
-		 var encrypted_body = null;
+                 if (true) {
+		     var data = _.extend({
+			 t: (new Date()).getTime()
+                     }, body_params);
+		     var post_body = _this.make_post_body( data );
+		     var xbtseq = _this.cipher.ivoffset; // GRAB this before encrypting!!!
+		     var encrypted_body = _this.cipher.encrypt( post_body );
+                 } else {
+		     var post_body = null;
+		     var encrypted_body = null;
+                 }
 	     }
              
              if (options && options.timeout) {
@@ -70,8 +85,9 @@
              }
 
              if (this.jsonp) { 
+                 var firstparamsign = url_params ? '&' : '?';
                  method = 'GET'; 
-                 url = url + '&GUID=' + this.client_data.guid;
+                 url = url + firstparamsign + 'GUID=' + this.client_data.guid;
                  if (this.client_data.bt_talon_tkt) {
                      url = url + '&bt_talon_tkt=' + encodeURIComponent(this.client_data.bt_talon_tkt);
                  }
@@ -160,7 +176,8 @@
          /** @private **/
          make_request_url: function(params) {
              if (! params || _.keys(params).length==0) { 
-                 params = {nop:1};
+                 // don't do this.
+                 //params = {nop:1};
              }
              var parts = [];
              _.each(params, function(val,key) {
@@ -174,7 +191,7 @@
                             }
                         }
                     });
-             return parts.join('&');
+             return (parts.length > 0) ? parts.join('&') : '';
          },
          /** @private **/
          on_request_response: function(request, callback, failure_callback, data, status, xhr) {
